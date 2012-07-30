@@ -9,7 +9,7 @@ def _xpath(tree, xpathexp):
 
 def _pretty(tree):
     return etree.tostring(tree, pretty_print=True)
-    
+ 
 class XSBase(object):
     def __init__(self, tree):
         self._tree = tree
@@ -23,7 +23,7 @@ class XSBase(object):
 
         self._doc = "no docstring yet"
         if self._type == "simpleType":
-            doc = _xpath(self.tree, "xs.annotation/xs:documentation")
+            doc = _xpath(self.tree, "xs:annotation/xs:documentation")
             self._doc = doc[0].text
 
         if self._name is None:
@@ -33,6 +33,11 @@ class XSBase(object):
             methodname = self._name.replace("-", "_")
             self._methodName = methodname
             self._className = methodname[0].upper() + methodname[1:]
+            
+        self._elements = []
+        for e in _xpath(self.tree, "xs:sequence/element"):
+            ec = XSElement(e)
+            self._elements.append(ev)
       
     def __repr__(self):
         return _pretty(self._tree)
@@ -150,6 +155,34 @@ class XSElement(XSBase, XSRestriction):
             self.maxOccurs = -1
                         
         self.data = []
+        self._complexTypes = []
+        self._simpleTypes = []
+        
+        if self.xsType is not None:
+            print "################# ", self.xsType
+        
+        for ct in _xpath(self.tree, "./xs:complexType"):
+            ctc = XSClass(ct)
+            self._complexTypes.append(ctc)
+            
+        for st in _xpath(self.tree, "./xs:simpleType"):
+            stc = XSClass(st)
+            self._simpleTypes.append(stc)
+            
+    def __repr__(self):
+        for c in self._complexTypes, self._simpleTypes:
+            return _pretty(c)
+                
+    def code(self):
+        code = """# {3}
+class {0}(object):
+    def __init__(self):
+        self.name = {0}
+        self.minOccurs = {1}
+        self.maxOccurs = {2}
+""".format(self.className, self.minOccurs, self.maxOccurs, self.xsType)
+        return code
+            
 
 class XSClass(XSBaseExt):
     def __init__(self, tree):
@@ -158,6 +191,23 @@ class XSClass(XSBaseExt):
         for se in _xpath(self.tree, "./xs:sequence/xs:element[@name]"):
             E = XSElement(se)
             self._elements.append(E)
+
+    def __repr__(self):
+        super(XSClass, self).__repr__()
+        for e in self._elements:
+            return _pretty(e)
+        
+    def code(self):
+        code = """class {0}(object):
+    def __init__(self):
+        self.name = {0}
+""".format(self.className)
+        for e in self._elements:
+            code += """        self.{0} = {1}()
+""".format(e.methodName, e.className)
+        code += "\n"
+        return code
+
 
     def _classCode(self):
         
@@ -172,7 +222,6 @@ class XSClass(XSBaseExt):
     
     @property
     def elements(self):
-        return self._elements
         return self._elements
 
 class XSComplexType(XSClass):

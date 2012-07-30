@@ -37,15 +37,15 @@ if __name__ == '__main__':
         Names[ctc.name] = 1
         Names[ctc.methodName] = 1
         Names[ctc.className] = 1
-        print """tag: {0}
------------------------------------------------------------
-methodName: {1}
-className: {2}
-type: {3}
-namespace: {4}
-elements: {5}
-""".format(ctc.name, ctc.methodName, ctc.className, ctc.xsType,
-           ctc.namespaces, ctc.elements)
+        print ctc.code()
+#        print """tag: {0}
+#-----------------------------------------------------------
+#methodName: {1}
+#className: {2}
+#type: {3}
+#namespace: {4}
+#""".format(ctc.name, ctc.methodName, ctc.className, ctc.xsType,
+#           ctc.namespaces)
      
 #    for st in ST:
 #        print etree.tostring(st, pretty_print=True)
@@ -60,17 +60,18 @@ elements: {5}
         Names[ec.name] = 1
         Names[ec.methodName] = 1
         Names[ec.className] = 1
-        print """tag: {0}
------------------------------------------------------------
-methodName: {1}
-className: {2}
-minOccurs: {3}
-maxOccurs: {4}
-patterns: {5}
-allowed: {6}
-""".format(ec.name, ec.methodName, ec.className, ec.minOccurs,
-           ec.maxOccurs, ec.patterns, ec.allowed)
-    
+        print ec.code()
+#        print """tag: {0}
+#-----------------------------------------------------------
+#methodName: {1}
+#className: {2}
+#minOccurs: {3}
+#maxOccurs: {4}
+#patterns: {5}
+#allowed: {6}
+#""".format(ec.name, ec.methodName, ec.className, ec.minOccurs,
+#           ec.maxOccurs, ec.patterns, ec.allowed)
+#    
     #for x in S:
     #   classes.append(XSClass(x))
 
