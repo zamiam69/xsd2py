@@ -2,6 +2,7 @@
     This space temporarily left blank
 """
 from lxml import etree
+import re
 
 def _xpath(tree, xpathexp):
     """Short cut for the lxml.etree xpath method"""
@@ -9,22 +10,26 @@ def _xpath(tree, xpathexp):
 
 def _pretty(tree):
     return etree.tostring(tree, pretty_print=True)
- 
+
+class XSIncludeResolver(etree.Resolver):
+    def resolve(self, url, id, context):
+        print "Resolving: ", url, id, context
+        return self.resolve_filename(url, context)
+    
+class XSParser(etree.XMLParser):
+    def __init__(self):
+        super(XSParser, self).__init__()
+        self.resolvers.add(XSIncludeResolver())
+
 class XSBase(object):
-    def __init__(self, tree):
+    def __init__(self, tree, contains=[]):
         self._tree = tree
         self._tag = tree.tag
         r = self._tag.rindex("}")
         self._urn = self._tag[1:r]
         self._type = self._tag[r+1:]
         self._name = tree.get("name")
-        xstype = tree.get("type")
-        self.xsType = xstype
-
-        self._doc = "no docstring yet"
-        if self._type == "simpleType":
-            doc = _xpath(self.tree, "xs:annotation/xs:documentation")
-            self._doc = doc[0].text
+        self._content = {}
 
         if self._name is None:
             self._className = None
@@ -34,11 +39,33 @@ class XSBase(object):
             self._methodName = methodname
             self._className = methodname[0].upper() + methodname[1:]
             
-        self._elements = []
-        for e in _xpath(self.tree, "xs:sequence/element"):
-            ec = XSElement(e)
-            self._elements.append(ev)
-      
+        self._contains = contains
+        for tag in self._contains:
+            if tag not in self._content:
+                self._content[tag] = []
+            sts = _xpath(self._tree, "./xs:" + tag)
+            for st in sts:
+                C = XSClass(st)
+                if C is None:
+                    continue
+                self._content[tag].append(C)      
+                C._process()
+                
+    def _process(self):
+        pass
+    
+    def _code(self):
+        print "M: ", self.methodName
+        print "C: ", self.className
+        for t in self.content:
+            print t, ": "
+            for c in self.content[t]:
+                print "    ", c._code()
+                print "---"
+       
+        
+        
+        
     def __repr__(self):
         return _pretty(self._tree)
 
@@ -65,86 +92,56 @@ class XSBase(object):
     @property
     def className(self):
         return self._className
-
-    @property
-    def elements(self):
-        return self._elements
     
-class XSRestriction(object):
-    """restriction mix-in"""
-    def __init__(self, tree):
-        self._allowed = {}
-        self._patterns = []
-
-        for r in _xpath(tree, "./xs:restriction"):
-            print "### ", _pretty(r)
-            for v in _xpath(r, "./xs:enumeration"):
-                self._allowed[v.get("value")] = 1
-            for v in _xpath(r, "./xs:pattern"):
-                self._patterns.append(v.get("value"))
-                
-    def __repr__(self):
-        return {
-                "patterns": self._allowed,
-                "allowed": self._patterns
-        }
-                
     @property
-    def patterns(self):
-        return self._patterns
+    def xsType(self):
+        return self._xstype
 
     @property
-    def allowed(self):
-        return self._allowed
+    def contains(self):
+        return self._contains
+    
+    @property
+    def content(self):
+        return self._content
 
-class XSBaseExt(XSBase):
+class XSSchema(XSBase):
+    contains = ["annotation", "simpleType", "complexType", "element"]
+    
     def __init__(self, tree):
-        super(XSBaseExt, self).__init__(tree)
-       
-    def code(self, code="method"):
-        if code == "method":
-            return self._methodCode()
-        elif code == "class":
-            return self._classCode()
-        else:
-            raise NotImplementedError("This method is not defined.")
-
-    def _methodCode(self):
-        if self.xsType is None:
-            comment = ""
-        else:
-            comment = """# {0}: {1}""".format(
-                self.name, self.xsType
-            )
-
-        code = """
-    {0}
-    def {1}(self):
-        pass
-""".format(comment, self.methodName)
-        return code
-
-    def _classCode(self):
-        code = """
-class {0}(object):
-\"\"\"{1}\"\"\"
-    def __init__(self):
-        self._tag = \"{2}\"
-        self._urn = \"{3}\"
-        self._type = \"{4}\"
-        self._xstype = \"{5}\"
-""".format(self.className, self._doc, self.tag, self._urn, self._type, 
-    self.xsType)
-        if self._type == "complexType":
-            code += "        self._elements = []\n"
-        return code
-
-class XSElement(XSBase, XSRestriction):
-    """represents xs:element"""
-    def __init__(self, tree):
-        XSBase.__init__(self, tree)
-        XSRestriction.__init__(self, tree)
+        super(XSSchema, self).__init__(tree, XSSchema.contains)
+        #self._includes = [] 
+        #included = _xpath(tree, "./xs:include")
+        #for inc in included:
+        #    loc = inc.get("schemaLocation")
+        #    print loc
         
+    def _process(self, subtree):
+        pass
+ 
+class XSComplexType(XSBase):
+    contains = ["annotation", "simpleContent", "complexContent", "sequence"]
+    
+    def __init__(self, tree):
+        super(XSComplexType, self).__init__(tree, XSComplexType.contains)
+
+class XSSimpleType(XSBase):
+    contains = ["annotation", "restriction"]
+    
+    def __init__(self, tree):
+        super(XSSimpleType, self).__init__(tree, XSSimpleType.contains)
+
+class XSSequence(XSBase):
+    contains = ["element"]
+    
+    def __init__(self, tree):
+        super(XSSequence, self).__init__(tree, XSSequence.contains)
+
+class XSElement(XSBase):
+    contains = ["annotation", "simpleType", "complexType"]
+    
+    def __init__(self, tree):
+        super(XSElement, self).__init__(tree, XSElement.contains)
         self.minOccurs = tree.get("minOccurs")
         self.maxOccurs = tree.get("maxOccurs")
         if self.minOccurs is None:
@@ -153,79 +150,75 @@ class XSElement(XSBase, XSRestriction):
             self.maxOccurs = 1
         elif self.maxOccurs == "unbounded":
             self.maxOccurs = -1
-                        
-        self.data = []
-        self._complexTypes = []
-        self._simpleTypes = []
-        
-        if self.xsType is not None:
-            print "################# ", self.xsType
-        
-        for ct in _xpath(self.tree, "./xs:complexType"):
-            ctc = XSClass(ct)
-            self._complexTypes.append(ctc)
-            
-        for st in _xpath(self.tree, "./xs:simpleType"):
-            stc = XSClass(st)
-            self._simpleTypes.append(stc)
-            
-    def __repr__(self):
-        for c in self._complexTypes, self._simpleTypes:
-            return _pretty(c)
-                
-    def code(self):
-        code = """# {3}
-class {0}(object):
-    def __init__(self):
-        self.name = {0}
-        self.minOccurs = {1}
-        self.maxOccurs = {2}
-""".format(self.className, self.minOccurs, self.maxOccurs, self.xsType)
-        return code
-            
 
-class XSClass(XSBaseExt):
+        self.etype = tree.get("type")
+        if self.etype is not None:
+            xpathexp = "//*[@name = '" + self.etype + "']"
+            tdef = self.tree.getroottree().xpath(xpathexp, 
+                                                 namespaces=self.tree.nsmap)
+            for t in tdef:
+                print t.get("name")
+            
+        
+class XSDocumentation(XSBase):
     def __init__(self, tree):
-        super(XSClass, self).__init__(tree)
-        self._elements = []
-        for se in _xpath(self.tree, "./xs:sequence/xs:element[@name]"):
-            E = XSElement(se)
-            self._elements.append(E)
-
+        super(XSDocumentation, self).__init__(tree, XSAnnotation.contains)
+ 
+class XSAnnotation(XSBase):
+    contains = ["documentation", "appinfo"]
+    
+    def __init__(self, tree):
+        self.doc = ""
+        super(XSAnnotation, self).__init__(tree, XSAnnotation.contains)
+            
+    def __str__(self):
+        return self.doc
+    
     def __repr__(self):
-        super(XSClass, self).__repr__()
-        for e in self._elements:
-            return _pretty(e)
-        
-    def code(self):
-        code = """class {0}(object):
-    def __init__(self):
-        self.name = {0}
-""".format(self.className)
-        for e in self._elements:
-            code += """        self.{0} = {1}()
-""".format(e.methodName, e.className)
-        code += "\n"
-        return code
-
-
-    def _classCode(self):
-        
-        code = super(XSClass, self)._classCode()
-        for E in self.elements:
-            code += """        self._elements.append(\"{0}\")
-""".format(E.methodName)
-
-        for E in self.elements:
-            code += E.code("method")
-        return code
+        return _pretty(self._tree) 
+    
+class XSRestriction(XSBase):
+    contains = ["enumeration", "pattern"]
+    
+    def __init__(self, tree):
+        super(XSRestriction, self).__init__(tree, XSRestriction.contains)
+       
+    @property
+    def pattern(self):
+        return self.content["pattern"]
     
     @property
-    def elements(self):
-        return self._elements
-
-class XSComplexType(XSClass):
-    pass
-
-class XSSimpleType(XSClass):
-    pass
+    def enumeration(self):
+        return self.content["enumeration"]
+    
+    def check(self, extvalue):
+        for v in self.enumeration:
+            if extvalue == v:
+                return true
+            
+        for p in self.pattern:
+            if p.match(extvalue):
+                return true
+        
+        return false
+    
+class XSClass(object):
+    """Factory"""
+    def __new__(cls, tree):
+        xsobjects = {
+            "schema": XSSchema,
+            "element": XSElement,
+            "complexType": XSComplexType,
+            "simpleType": XSSimpleType,
+            "annotation": XSAnnotation,
+            "restriction": XSRestriction,
+            "sequence": XSSequence,
+            "documentation": XSDocumentation,
+        }        
+        tag = tree.tag
+        r = tag.rindex("}")
+        xstype = tag[r+1:]
+        if xstype in xsobjects:
+            return xsobjects[xstype](tree)
+        else:
+            return None
