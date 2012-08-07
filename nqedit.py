@@ -19,6 +19,6 @@ if __name__ == '__main__':
         
     S = XSClass(xsdroot)
     
-    S._code()
+    print S._code()
 
  # vim: sts=4 sw=4 ts=4 et:

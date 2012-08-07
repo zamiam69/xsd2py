@@ -4,12 +4,41 @@
 from lxml import etree
 import re
 
+_NOCODE = ["annotation", "documentation"]
+
 def _xpath(tree, xpathexp):
     """Short cut for the lxml.etree xpath method"""
     return tree.xpath(xpathexp, namespaces=tree.nsmap)
 
 def _pretty(tree):
     return etree.tostring(tree, pretty_print=True)
+
+def _methodName(name):
+    if name is not None:
+        return name.replace("-", "_")
+    return None
+    
+def _className(name):
+    if name is not None:
+        methodname = _methodName(name)
+        return methodname[0].upper() + methodname[1:]
+    return None
+
+def _fNoCode(x):
+    return x not in _NOCODE
+
+#def _recContent(method):
+#    def recurse(self, *args, **kwargs):
+#        for t in self.content:
+#            print "=" * 80 
+#            print "#", t
+#            print "=" * 80 
+#            method(self, *args, **kwargs)
+#            for c in self.content[t]:
+#                print "    ", c.name
+#                method(c, *args, **kwargs)
+#    return recurse
+#        
 
 class XSIncludeResolver(etree.Resolver):
     def resolve(self, url, id, context):
@@ -22,7 +51,7 @@ class XSParser(etree.XMLParser):
         self.resolvers.add(XSIncludeResolver())
 
 class XSBase(object):
-    def __init__(self, tree, contains=[]):
+    def __init__(self, tree, contains=None):
         self._tree = tree
         self._tag = tree.tag
         r = self._tag.rindex("}")
@@ -31,15 +60,10 @@ class XSBase(object):
         self._name = tree.get("name")
         self._content = {}
 
-        if self._name is None:
-            self._className = None
-            self._methodName = None
-        else:
-            methodname = self._name.replace("-", "_")
-            self._methodName = methodname
-            self._className = methodname[0].upper() + methodname[1:]
+        self._methodName = _methodName(self.name)
+        self._className =_className(self.name)
             
-        self._contains = contains
+        self._contains = contains or []
         for tag in self._contains:
             if tag not in self._content:
                 self._content[tag] = []
@@ -54,21 +78,27 @@ class XSBase(object):
     def _process(self):
         pass
     
-    def _code(self):
-        print "M: ", self.methodName
-        print "C: ", self.className
-        for t in self.content:
-            print t, ": "
+    def _code(self, depth=0, indent="   "):
+        code = ""    
+        for t in filter(_fNoCode, self.content.keys()):
             for c in self.content[t]:
-                print "    ", c._code()
-                print "---"
-       
+                code += c._code(depth, indent)
+        return code
+            
+    def  _doc(self):
+        doc = ""
+        subsections = self.content.keys()
+        if "annotation" not in subsections:
+            print "... ", self.name
+            return ""
         
-        
-        
+        for d in self.content["annotation"]:
+            doc += d._doc()
+        return doc
+
     def __repr__(self):
         return _pretty(self._tree)
-
+    
     @property
     def tree(self):
         return self._tree
@@ -95,7 +125,7 @@ class XSBase(object):
     
     @property
     def xsType(self):
-        return self._xstype
+        return self._type
 
     @property
     def contains(self):
@@ -104,7 +134,7 @@ class XSBase(object):
     @property
     def content(self):
         return self._content
-
+    
 class XSSchema(XSBase):
     contains = ["annotation", "simpleType", "complexType", "element"]
     
@@ -118,19 +148,64 @@ class XSSchema(XSBase):
         
     def _process(self, subtree):
         pass
- 
+    
 class XSComplexType(XSBase):
     contains = ["annotation", "simpleContent", "complexContent", "sequence"]
     
     def __init__(self, tree):
         super(XSComplexType, self).__init__(tree, XSComplexType.contains)
+        
+    def _code(self, depth=0, indent="    "):
+        code = ""
+        if self._className is not None:
+            params = {
+                      'indent0':  indent * depth,
+                      'indent': indent * (depth + 1),
+                      'className': self.className,
+                      'methodName': self.methodName,
+                      'docstring': self._doc(),
+            }
+            code += """
+{indent0}class {className}(object):
+{indent0}{indent}\"\"\"{docstring}\"\"\"
+{indent0}{indent}def __init__(self):
+{indent0}{indent}{indent}pass
+""".format(**params)
 
+        for t in filter(_fNoCode, self.content.keys()):
+            for c in self.content[t]:
+                code += c._code(depth, indent)
+        return code
+ 
 class XSSimpleType(XSBase):
     contains = ["annotation", "restriction"]
     
     def __init__(self, tree):
         super(XSSimpleType, self).__init__(tree, XSSimpleType.contains)
+    
+    def _code(self, depth=0, indent="    "):
+        code = ""
+        if self._className is not None:
+            params = {
+                      'indent0':  indent * depth,
+                      'indent': indent * (depth + 1),
+                      'className': self.className,
+                      'methodName': self.methodName,
+                      'docstring': self._doc(),
+            }
+            code += """
+{indent0}class {className}(object):
+{indent0}{indent}\"\"\"{docstring}\"\"\"
+{indent0}{indent}def __init__(self):
+{indent0}{indent}{indent}pass
+""".format(**params)
 
+        for t in filter(_fNoCode, self.content.keys()):
+            for c in self.content[t]:
+                code += c._code(depth, indent)
+                
+        return code
+ 
 class XSSequence(XSBase):
     contains = ["element"]
     
@@ -158,25 +233,61 @@ class XSElement(XSBase):
                                                  namespaces=self.tree.nsmap)
             for t in tdef:
                 print t.get("name")
-            
-        
+                
+    def _code(self, depth=0, indent="    "):
+        code = ""
+        if self._className is not None:
+            params = {
+                      'indent0':  indent * depth,
+                      'indent': indent * (depth + 1),
+                      'className': self.className,
+                      'methodName': self.methodName,
+                      'docstring': self._doc(),
+                      'minOccurs': self.minOccurs,
+                      'maxOccurs': self.maxOccurs,
+                      'superMeth': _methodName(self.etype),
+                      'superClass': _className(self.etype),
+            }
+            code += """
+{indent0}class {className}({superClass}):
+{indent0}{indent}\"\"\"{docstring}\"\"\"
+{indent0}{indent}def __init__(self):
+{indent0}{indent}{indent}super({className}, self).__init__()
+{indent0}{indent}{indent}self.minOccurs = {minOccurs}
+{indent0}{indent}{indent}self.maxOccurs = {maxOccurs}
+""".format(**params)
+ 
+        for t in filter(_fNoCode, self.content.keys()):
+            for c in self.content[t]:
+                code += c._code(depth, indent)
+                
+        return code
+  
 class XSDocumentation(XSBase):
     def __init__(self, tree):
         super(XSDocumentation, self).__init__(tree, XSAnnotation.contains)
- 
+        
+    def __repr__(self):
+        return self.tree.text
+
 class XSAnnotation(XSBase):
     contains = ["documentation", "appinfo"]
     
     def __init__(self, tree):
-        self.doc = ""
         super(XSAnnotation, self).__init__(tree, XSAnnotation.contains)
             
     def __str__(self):
-        return self.doc
+        return self._doc()
     
     def __repr__(self):
-        return _pretty(self._tree) 
+        return _pretty(self._tree)
     
+    def _doc(self):
+        doc = ""
+        for d in self.content["documentation"]:
+            doc += repr(d)
+        return doc
+            
 class XSRestriction(XSBase):
     contains = ["enumeration", "pattern"]
     
